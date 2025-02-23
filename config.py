@@ -1,7 +1,7 @@
 # config.py - Telegram bot configuration
 
 # Telegram 客户端配置
-api_id = ''  #书记
+api_id = ''  #
 api_hash = ''
 user_session = 'shuji_session'  # 多账号启动时请确保用户认证文件名不同
 
