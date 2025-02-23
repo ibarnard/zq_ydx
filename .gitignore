@@ -1,5 +1,22 @@
-echo "*.session" > .gitignore
-echo "data.json" >> .gitignore
-echo "__pycache__/" >> .gitignore
-echo "*.pyc" >> .gitignore
-echo "设计想法.md" >> .gitignore
+# 敏感配置文件
+config.py
+设计想法.md
+
+# Telegram 运行时文件
+*.session
+*.session-journal
+*.json
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# 系统文件
+.DS_Store
+zq_ydx.code-workspace
+.vscoke
+.venv
+
+# 其他文件
+zqydx_env
+R 佬更新的
