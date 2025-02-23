@@ -2,3 +2,4 @@ echo "*.session" > .gitignore
 echo "data.json" >> .gitignore
 echo "__pycache__/" >> .gitignore
 echo "*.pyc" >> .gitignore
+echo "设计想法.md" >> .gitignore
