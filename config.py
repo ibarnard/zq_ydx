@@ -1,15 +1,15 @@
 # config.py - Telegram bot configuration
 
 # Telegram 客户端配置
-api_id = '23573437'  #书记
-api_hash = '1741a2374e2371daab729ce34c0e189a'
+api_id = ''  #书记
+api_hash = ''
 user_session = 'shuji_session'  # 多账号启动时请确保用户认证文件名不同
 
 # 群组和用户
-group = [-1002262543959, -1001833464786, 'me']  # 监控群组
-zq_group = [-1002262543959, -1001833464786, 'me']  # 朱雀菠菜群组,4786 是朱雀官方群,959是菠菜群
-zq_bot = 5697370563  # 朱雀 bot ID
-user = 5721909476  # 自己的 ID
+group = [-100234239, -10031786, 'me']  # 监控群组
+zq_group = [-100259, -1786, 'me']  # zq菠菜群组
+zq_bot = 123  # zq bot ID
+user = 1234  # 自己的 ID
 
 # 转账统计
 name = "书记"
