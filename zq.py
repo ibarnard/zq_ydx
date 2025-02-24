@@ -9,8 +9,6 @@ import config
 import variable
 from collections import defaultdict
 
-
-
 # --------------------- 用户命令处理 ---------------------
 async def zq_user(client, event):
     """处理用户输入的命令，从收藏夹接收"""
@@ -34,7 +32,7 @@ async def zq_user(client, event):
             "- **top**：显示捐赠排行榜 Top 20\n"
             "- **ys <key> <values>**：设置预设参数（如 'ys my 30 2 1 1 1 1 20000'）\n"
             "- **yss**：查看所有预设，'yss dl <key>' 删除预设\n"
-            "- **xc**：查询当天和本轮盈利\n"
+            "- **cx**：查询当天和本轮盈利\n"
             "- **test <name>**：运行测试场景（bet, zhuanzhang, notify）"
         )
         message = await client.send_message('me', help_text, parse_mode="markdown")
@@ -63,8 +61,11 @@ async def zq_user(client, event):
             variable.lose_three = float(preset[4])
             variable.lose_four = float(preset[5])
             variable.initial_amount = int(preset[6])
+            variable.win_count = 0  # 重置连赢次数，确保新预设生效
+            variable.lose_count = 0  # 重置连输次数，确保新预设生效
             message = await client.send_message('me', f"启动预设 '{preset_key}' 成功：{preset}", parse_mode="markdown")
             asyncio.create_task(delete_later(client, message.chat_id, message.id, 10))
+            await update_stat_messages(client)
         else:
             await client.send_message('me', f"命令失败，无效预设：{preset_key}")
         return
@@ -125,9 +126,12 @@ async def zq_user(client, event):
                 await client.send_message('me', f"命令失败，参数无效：模式 {mode}，范围：0-2")
                 return
             variable.mode = mode
+            variable.win_count = 0  # 重置连赢次数，确保新模式从头开始
+            variable.lose_count = 0  # 重置连输次数，确保新模式从头开始
             mode_names = {0: "反投模式", 1: "预测模式", 2: "追投模式"}
             message = await client.send_message('me', f"切换{mode_names[mode]}成功", parse_mode="markdown")
             asyncio.create_task(delete_later(client, message.chat_id, message.id, 10))
+            await update_stat_messages(client)
         except ValueError:
             await client.send_message('me', "命令失败，参数无效：模式需为整数")
         return
@@ -139,7 +143,7 @@ async def zq_user(client, event):
             return
         variable.open_ydx = True
         try:
-            await client.send_message(config.zq_group, '/ydx')  # 发送到朱雀菠菜群
+            await client.send_message(config.zq_group, '/ydx')
             message = await client.send_message('me', "开启自动押注成功", parse_mode="markdown")
             asyncio.create_task(delete_later(client, message.chat_id, message.id, 10))
         except Exception as e:
@@ -248,9 +252,9 @@ async def zq_user(client, event):
         return
 
     # 查询盈利
-    if cmd == "xc":
+    if cmd == "cx":
         if len(command_parts) != 1:
-            await client.send_message('me', "命令失败，格式错误：xc 无需参数")
+            await client.send_message('me', "命令失败，格式错误：cx 无需参数")
             return
         if not variable.daily_profits:
             await client.send_message('me', "你今天赌没赌，你心里没数吗？", parse_mode="markdown")
@@ -268,7 +272,6 @@ async def zq_user(client, event):
 async def test_scenarios(client, event, test_name):
     """处理测试场景，发送到收藏夹"""
     if test_name == "zhuanzhang":
-        # 测试自己转账给别人
         test_data = {"5697370563": [{"id": 123, "-count": 3, "-amount": 3000}]}
         self_text = config.DONATION_TEMPLATES["self_to_others"].format(
             count=test_data["5697370563"][0]['-count'],
@@ -276,7 +279,6 @@ async def test_scenarios(client, event, test_name):
         )
         await client.send_message('me', "测试自己转账话术：\n" + self_text)
 
-        # 测试收到他人转账
         bot_data = [
             {"id": 111, "name": "User1", "count": 10, "amount": 10000, "-count": 0, "-amount": 0},
             {"id": 123, "name": "TestUser", "count": 5, "amount": 5000, "-count": 2, "-amount": 2000},
@@ -298,33 +300,42 @@ async def test_scenarios(client, event, test_name):
         await client.send_message('me', "测试收到他人转账话术：\n" + donation_text)
 
     elif test_name == "bet":
-        # 测试单次押注通知
-        await client.send_message('me', "⚡ 押注：押大\n💵 金额：20000")
-        await client.send_message('me', "第1轮第0场第1次：赢 19,800元，当前连输0次")
-        await client.send_message('me', "📉 输赢统计：赢 19,800\n🎲 结果：大")
-        await client.send_message('me', "测试押注通知：模拟单次赢19800元")
+        # 测试押注情况通知
+        await send_notification(client, "bet_start", 'me',
+            round_start_time=variable.round_start_time,
+            round_number=1, game_count=0, bet_count_per_game=1,
+            direction="押大", amount=20000,
+            total=variable.total, win_total=variable.win_total, earnings=variable.earnings)
+        # 测试押注结果通知
+        await send_notification(client, "bet_result", 'me',
+            round_start_time=variable.round_start_time,
+            round_number=1, game_count=0, bet_count_per_game=1,
+            result="大", outcome="赢", amount=19800, consecutive_loss=0)
+        await client.send_message('me', "测试押注通知：模拟单次赢19800")
 
     elif test_name == "notify":
-        # 测试所有通知场景
-        await client.send_message('me', "⚡ 押注：押大\n💵 金额：20000")
-        await client.send_message('me', "第1轮第0场第1次：赢 19,800元，当前连输0次")
-        await client.send_message('me', "📉 输赢统计：赢 19,800\n🎲 结果：大")
+        await send_notification(client, "bet_start", 'me',
+            round_start_time=variable.round_start_time,
+            round_number=1, game_count=0, bet_count_per_game=1,
+            direction="押大", amount=20000,
+            total=variable.total, win_total=variable.win_total, earnings=variable.earnings)
+        await send_notification(client, "bet_result", 'me',
+            round_start_time=variable.round_start_time,
+            round_number=1, game_count=0, bet_count_per_game=1,
+            result="大", outcome="赢", amount=19800, consecutive_loss=0)
         await send_notification(client, "game_end", 'me',
             round_start_time=variable.round_start_time,
             round_number=1, game_count=0, bet_count_per_game=2,
-            game_profit=1980, consecutive_loss=0
-        )
+            game_profit=1980, consecutive_loss=0)
         await send_notification(client, "explode", 'me',
             round_start_time=variable.round_start_time,
             round_number=1, game_count=1, game_profit=-5000,
-            round_profit=-2000, stop=30
-        )
+            round_profit=-2000, stop=30)
         await send_notification(client, "round_end", 'me',
             round_start_time=variable.round_start_time,
             round_number=1, game_count=12, round_profit=1000000,
             total=50, explode_times=3, loss_amount=15000,
-            max_consecutive_loss=5
-        )
+            max_consecutive_loss=5)
         await client.send_message('me', "测试通知：模拟单次、场结束、被炸、轮结束通知")
 
     else:
@@ -333,7 +344,7 @@ async def test_scenarios(client, event, test_name):
 # --------------------- 押注相关 ---------------------
 async def zq_bet_on(client, event):
     """处理押注逻辑，决定是否押注及金额"""
-    await asyncio.sleep(5)  # 延迟模拟处理
+    await asyncio.sleep(5)  # 模拟延迟，确保消息处理顺序
     if not (variable.bet_on or (variable.mode and variable.mode_stop) or (variable.mode == 2 and variable.mode_stop)):
         variable.bet = False
         return
@@ -341,10 +352,7 @@ async def zq_bet_on(client, event):
     if not event.reply_markup:
         return
 
-    # 记录场内押注次数
-    variable.bet_count_per_game += 1
-
-    # 预测和计算押注
+    variable.bet_count_per_game += 1  # 记录本场下注次数
     check = (
         predict_next_combined_trend(variable.history) if variable.mode == 1 else
         predict_next_trend(variable.history) if variable.mode == 0 else
@@ -357,10 +365,15 @@ async def zq_bet_on(client, event):
     )
     combination = find_combination(variable.bet_amount)
 
-    # 执行押注并发送通知
     if combination:
         variable.bet = True
-        await client.send_message('me', f"⚡ 押注：{'押大' if check else '押小'}\n💵 金额：{format_number(variable.bet_amount)}", parse_mode="markdown")
+        # 发送押注情况通知
+        await send_notification(client, "bet_start", 'me',
+            round_start_time=variable.round_start_time,
+            round_number=variable.round_number, game_count=variable.game_count,
+            bet_count_per_game=variable.bet_count_per_game,
+            direction="押大" if check else "押小", amount=variable.bet_amount,
+            total=variable.total, win_total=variable.win_total, earnings=variable.earnings)
         await bet(check, combination, event)
     else:
         if variable.mark:
@@ -399,9 +412,9 @@ def predict_next_trend(history):
 def calculate_bet_amount(win_count, lose_count, initial_amount, lose_stop, lose_once, lose_twice, lose_three, lose_four):
     """计算押注金额，含微调优化"""
     if win_count >= 0 and lose_count == 0:
-        return closest_multiple_of_500(initial_amount)
+        return closest_multiple_of_500(initial_amount)  # 首次下注使用初始金额
     if (lose_count + 1) > lose_stop:
-        return 0
+        return 0  # 超过连输限制停止下注
     multipliers = [lose_once, lose_twice, lose_three, lose_four]
     current_multiplier = multipliers[min(lose_count - 1, 3)]
     return closest_multiple_of_500(variable.bet_amount * current_multiplier * 1.01)
@@ -424,12 +437,12 @@ def closest_multiple_of_500(n):
 
 async def bet(check, combination, event):
     """执行押注操作"""
-    variable.total += 1
+    variable.total += 1  # 总下注次数递增
     buttons = variable.big_button if check else variable.small_button
     for amount in combination:
         await event.click(buttons[amount])
-        await asyncio.sleep(1.5)
-    variable.bet_type = 1 if check else 0
+        await asyncio.sleep(1.5)  # 模拟点击延迟
+    variable.bet_type = 1 if check else 0  # 设置押注类型（1=大，0=小）
 
 # --------------------- 结算相关 ---------------------
 async def zq_settle(client, event):
@@ -437,26 +450,24 @@ async def zq_settle(client, event):
     if not event.pattern_match:
         return
 
-    # 提取结果
     result_value = event.pattern_match.group(1)
     result_text = event.pattern_match.group(2)
     if variable.open_ydx:
         try:
-            await client.send_message(config.zq_group, '/ydx')  # 发送到朱雀菠菜群
+            await client.send_message(config.zq_group, '/ydx')
         except Exception as e:
             await client.send_message('me', f"发送 '/ydx' 失败：{str(e)}", parse_mode="markdown")
 
-    # 更新历史
     if len(variable.history) >= 1000:
-        variable.history.pop(0)  # 移除最早记录
-    is_win = result_text == variable.consequence
-    variable.history.append(1 if is_win else 0)
-    variable.win_times = variable.win_times + 1 if is_win else 0
-    variable.lose_times = variable.lose_times + 1 if not is_win else 0
+        variable.history.pop(0)  # 历史记录超限移除最早数据
+    variable.history.append(1 if result_text == "大" else 0)
+    variable.win_times = variable.win_times + 1 if result_text == "大" else 0
+    variable.lose_times = variable.lose_times + 1 if result_text == "小" else 0
     whether_bet_on(variable.win_times, variable.lose_times)
 
-    # 计算胜负并发送通知
     if variable.bet:
+        # 判断输赢：结合 bet_type 和 result_text
+        is_win = (variable.bet_type == 1 and result_text == "大") or (variable.bet_type == 0 and result_text == "小")
         if is_win:
             variable.win_total += 1
             win_amount = int(variable.bet_amount * 0.99)
@@ -481,57 +492,41 @@ async def zq_settle(client, event):
                 variable.max_consecutive_loss, variable.current_consecutive_loss
             )
 
-        # 发送单次下注通知（新旧格式分别发送）
-        amount = win_amount if is_win else loss
-        await client.send_message('me', (
-            f"第{variable.round_number}轮第{variable.game_count}场第{variable.bet_count_per_game}次："
-            f"{'赢' if is_win else '输'} {format_number(amount)}元，当前连输{variable.current_consecutive_loss}次"
-        ), parse_mode="markdown")
-        await client.send_message('me', (
-            f"📉 输赢统计：{'赢' if is_win else '输'} {format_number(amount)}\n"
-            f"🎲 结果：{result_text}"
-        ), parse_mode="markdown")
+        # 发送押注结果通知
+        await send_notification(client, "bet_result", 'me',
+            round_start_time=variable.round_start_time,
+            round_number=variable.round_number, game_count=variable.game_count,
+            bet_count_per_game=variable.bet_count_per_game,
+            result=result_text, outcome="赢" if is_win else "输",
+            amount=win_amount if is_win else loss,
+            consecutive_loss=variable.current_consecutive_loss)
 
-        # 发送盈利情况通知
-        win_rate = (variable.win_total / variable.total * 100) if variable.total > 0 else 0
-        await client.send_message('me', (
-            f"🎯 押注次数：{variable.total}\n"
-            f"🏆 胜率：{win_rate:.2f}%\n"
-            f"💰 收益：{format_number(variable.earnings)}"
-        ), parse_mode="markdown")
-
-    # 场结束判断
+    # 判断是否结束本场
     game_ended = False
     if is_win and variable.bet:
         game_ended = True
+        # 发送场结束通知
         await send_notification(client, "game_end", 'me',
             round_start_time=variable.round_start_time,
-            round_number=variable.round_number,
-            game_count=variable.game_count,
+            round_number=variable.round_number, game_count=variable.game_count,
             bet_count_per_game=variable.bet_count_per_game,
-            game_profit=variable.game_profit,
-            consecutive_loss=variable.current_consecutive_loss
-        )
+            game_profit=variable.game_profit, consecutive_loss=variable.current_consecutive_loss)
     elif variable.explode_count >= variable.explode:
         game_ended = True
+        # 发送炸停通知
         await send_notification(client, "explode", 'me',
             round_start_time=variable.round_start_time,
-            round_number=variable.round_number,
-            game_count=variable.game_count,
-            game_profit=variable.game_profit,
-            round_profit=variable.round_profit,
-            stop=variable.stop
-        )
+            round_number=variable.round_number, game_count=variable.game_count,
+            game_profit=variable.game_profit, round_profit=variable.round_profit,
+            stop=variable.stop)
     elif variable.current_consecutive_loss >= variable.lose_stop or variable.current_consecutive_loss >= variable.continuous:
         game_ended = True
+        # 发送场结束通知
         await send_notification(client, "game_end", 'me',
             round_start_time=variable.round_start_time,
-            round_number=variable.round_number,
-            game_count=variable.game_count,
+            round_number=variable.round_number, game_count=variable.game_count,
             bet_count_per_game=variable.bet_count_per_game,
-            game_profit=variable.game_profit,
-            consecutive_loss=variable.current_consecutive_loss
-        )
+            game_profit=variable.game_profit, consecutive_loss=variable.current_consecutive_loss)
 
     if game_ended:
         variable.game_count += 1
@@ -539,7 +534,7 @@ async def zq_settle(client, event):
         variable.game_profit = 0
         variable.bet = False
 
-    # 暂停逻辑（仅被炸触发）
+    # 处理炸停暂停逻辑
     if variable.explode_count >= variable.explode:
         if variable.stop_count > 1:
             variable.stop_count -= 1
@@ -552,22 +547,19 @@ async def zq_settle(client, event):
             variable.mode_stop = True
             variable.mark = True
 
-    # 轮结束判断
+    # 判断是否结束本轮
     if variable.round_profit >= variable.profit:
         variable.daily_profits[variable.round_number] = variable.round_profit
         data = load_data_from_file()
         data["daily_profits"] = variable.daily_profits
         save_data_to_file(data)
+        # 发送轮结束通知
         await send_notification(client, "round_end", 'me',
             round_start_time=variable.round_start_time,
-            round_number=variable.round_number,
-            game_count=variable.game_count,
-            round_profit=variable.round_profit,
-            total=variable.total,
-            explode_times=variable.explode_times,
-            loss_amount=variable.loss_amount,
-            max_consecutive_loss=variable.max_consecutive_loss
-        )
+            round_number=variable.round_number, game_count=variable.game_count,
+            round_profit=variable.round_profit, total=variable.total,
+            explode_times=variable.explode_times, loss_amount=variable.loss_amount,
+            max_consecutive_loss=variable.max_consecutive_loss)
         # 重置轮相关变量
         variable.round_number += 1
         variable.round_profit = 0
@@ -579,7 +571,7 @@ async def zq_settle(client, event):
         variable.max_consecutive_loss = 0
         variable.current_consecutive_loss = 0
 
-    # 更新统计消息
+    # 更新策略统计消息
     if variable.message:
         await variable.message.delete()
     await update_stat_messages(client)
@@ -629,25 +621,75 @@ async def update_stat_messages(client):
 
 # --------------------- 通知函数 ---------------------
 async def send_notification(client, type, target, **kwargs):
-    """统一处理通知消息，所有金额加千位分隔符，发送到收藏夹"""
-    if type == "game_end":
-        month_day = kwargs['round_start_time'].strftime('%m月%d日')
-        msg = (f"{month_day}的第{kwargs['round_number']}轮的第{kwargs['game_count']}场，"
-               f"押注了{kwargs['bet_count_per_game']}次，盈利{format_number(kwargs['game_profit'])}元，"
-               f"本场连输{kwargs['consecutive_loss']}次")
+    """统一处理所有通知消息，所有金额加千位分隔符，发送到收藏夹"""
+    # 提取通用参数
+    month_day = kwargs.get('round_start_time', variable.round_start_time).strftime('%m月%d日')
+    round_number = kwargs.get('round_number', variable.round_number)
+    game_count = kwargs.get('game_count', variable.game_count)
+    bet_count_per_game = kwargs.get('bet_count_per_game', variable.bet_count_per_game)
+
+    if type == "bet_start":
+        # 押注情况通知：每次下注开始时触发
+        direction = kwargs['direction']
+        amount = kwargs['amount']
+        total = kwargs['total']
+        win_total = kwargs['win_total']
+        earnings = kwargs['earnings']
+        msg = (
+            f"**{month_day}第{round_number}轮第{game_count}场第{bet_count_per_game}次：**\n"
+            f"⚡ 押注：{direction}\n"
+            f"💵 金额：{format_number(amount)}"
+        )
+        # 每10次下注附加统计信息
+        if total % 10 == 0 and total > 0:
+            win_rate = (win_total / total * 100) if total > 0 else 0
+            msg += (
+                f"\n🎯 押注次数：{total}\n"
+                f"🏆 胜率：{win_rate:.2f}%\n"
+                f"💰 收益：{format_number(earnings)}"
+            )
         await client.send_message(target, msg, parse_mode="markdown")
+
+    elif type == "bet_result":
+        # 押注结果通知：每次下注结算时触发，无论输赢
+        result = kwargs['result']
+        outcome = kwargs['outcome']
+        amount = kwargs['amount']
+        consecutive_loss = kwargs['consecutive_loss']
+        msg = (
+            f"**{month_day}第{round_number}轮第{game_count}场第{bet_count_per_game}次：**\n"
+            f"🎲 结果：{result}\n"
+            f"📉 {outcome} {format_number(amount)}\n"
+            f"🔪 当前连输{consecutive_loss}次"
+        )
+        await client.send_message(target, msg, parse_mode="markdown")
+
+    elif type == "game_end":
+        # 场结束通知：本场赢得或连输达标时触发
+        msg = (
+            f"**{month_day}的第{round_number}轮第{game_count}场：**\n"
+            f"押注了{bet_count_per_game}次，盈利{format_number(kwargs['game_profit'])}，"
+            f"本场连输{kwargs['consecutive_loss']}次"
+        )
+        await client.send_message(target, msg, parse_mode="markdown")
+
     elif type == "explode":
-        month_day = kwargs['round_start_time'].strftime('%m月%d日')
-        msg = (f"{month_day}的第{kwargs['round_number']}轮的第{kwargs['game_count']}场，"
-               f"因为被炸了，盈利{format_number(kwargs['game_profit'])}元，"
-               f"截止目前总盈利{format_number(kwargs['round_profit'])}元，暂停{kwargs['stop']}局后继续莽！")
+        # 炸停通知：炸停次数达标时触发
+        msg = (
+            f"**{month_day}的第{round_number}轮第{game_count}场：**\n"
+            f"因为被炸了，盈利{format_number(kwargs['game_profit'])}\n"
+            f"截止目前总盈利{format_number(kwargs['round_profit'])}，暂停{kwargs['stop']}局后继续莽！"
+        )
         await client.send_message(target, msg, parse_mode="markdown")
+
     elif type == "round_end":
-        month_day = kwargs['round_start_time'].strftime('%m月%d日')
-        msg = (f"{month_day}的第{kwargs['round_number']}轮共下注{kwargs['game_count']}场，"
-               f"总盈利{format_number(kwargs['round_profit'])}元，共押注{kwargs['total']}次，"
-               f"其中被炸了{kwargs['explode_times']}次，损失{format_number(kwargs['loss_amount'])}元，"
-               f"最高连输{kwargs['max_consecutive_loss']}次")
+        # 轮结束通知：轮盈利达标时触发
+        msg = (
+            f"**{month_day}的第{round_number}轮共下注{kwargs['game_count']}场:**\n"
+            f"总盈利{format_number(kwargs['round_profit'])}，共押注{kwargs['total']}次\n"
+            f"其中被炸了{kwargs['explode_times']}次，损失{format_number(kwargs['loss_amount'])}，"
+            f"最高连输{kwargs['max_consecutive_loss']}次"
+        )
         await client.send_message(target, msg, parse_mode="markdown")
 
 def whether_bet_on(win_times, lose_times):
@@ -658,7 +700,7 @@ def whether_bet_on(win_times, lose_times):
     else:
         variable.bet_on = False
         if variable.mode == 0:
-            variable.win_count = variable.lose_count = 0
+            variable.win_count = variable.lose_count = 0  # 反投模式下未达标时重置
 
 def count_consecutive(data):
     """统计历史中连续次数"""
